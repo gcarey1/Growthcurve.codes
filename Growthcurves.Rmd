@@ -1,0 +1,151 @@
+---
+title: "Growth Curve Experiment"
+author: "Grace Carey"
+date: "2024-06-06"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+library(tidyverse)
+library(dplyr )
+library(ggplot2)
+library(knitr)
+options(kableExtra.auto_format = FALSE)
+library(kableExtra)
+library(plyr)
+library(readxl)
+options(knitr.table.format = "latex")
+
+```
+
+[Experiment description]
+
+# Files used for this data
+
+```{r, chunkreadfiles, fig.height = 5, fig.width = 5, echo=FALSE}
+full_df <- read_excel("R2A.test.6.3.24.gc.xlsx") #file with growth curve information, directly output from plate reader with no changes
+anticonc <- read.csv("R2Atestkey6524.csv") #file with information about the antibiotic concentrations used in the growth curve experiment.
+
+# List of file names
+file_names <- c(
+  "R2A.test.6.3.24.gc.xlsx","---", "R2Atestkey6524.csv"
+                #Additional file names here
+                )
+
+# Additional information about each file
+file_info <- c("File with growthcurve data, taken directly from the Synergy HTX reader with no changes","---", "Key with antibiotic and culture contents for each well in growthcurve data file")
+
+file_df <- data.frame(File_Names = file_names, Information = file_info)
+
+kable(file_df, "latex", booktabs = TRUE) %>%
+  kable_styling(full_width = TRUE)%>%
+               add_header_above(c("Files used in this script" = ncol(file_df)))%>%
+  column_spec(1, width = "10cm")
+
+```
+# Growth curves serial culture experiment
+
+[Add additional notes and information here]
+
+```{r, curves,echo=FALSE}
+
+anticonc <- anticonc[, !names(anticonc) %in% "Timepoint"]
+#First we read in the file as it comes out of the plate reader, no changes. 
+#Then we remove the top, header, information and read it into a new dataframe
+header_data <- full_df[1:26, ]
+#Next extract the part of the file which contains the actual read information. #The rows selected may need to change depending on the length of the file. 
+data_without_header <- full_df[-(1:27), ]
+data_selected <- full_df[27:151, ]
+colnames(data_selected) <- as.character(unlist(data_selected[1, ]))
+
+plate_reader <- data_selected[-1, ]
+#The plate_reader df now contains the information for the curves.
+plate_reader <- plate_reader[, -1] 
+
+plate_reader <- plate_reader %>%
+  mutate(Timepoint = seq(5, by = 10, length.out = nrow(plate_reader)))
+
+# plate_reader <- plate_reader %>%
+#   select(-c("T° 600", "Time"))
+#now pivot longer
+plate_reader_long <- pivot_longer(plate_reader, 
+                        cols = -Timepoint, # Columns other than "Timepoint" will become row names
+                        names_to = "Well", 
+                        values_to = "OD600") 
+
+plate_conc <- full_join(plate_reader_long, anticonc, by = "Well")
+
+plate_conc  <- transform(plate_conc, Timepoint = as.numeric(Timepoint), Contents = as.factor(Contents),Culture = as.factor(Culture), OD600 = as.numeric(OD600))
+
+plate_conc_filtered <- plate_conc[plate_conc$Culture != "", ]
+
+```
+
+
+```{r, different curve method, fig.width = 6, fig.height=9, echo = FALSE}
+
+plate_conc_filtered2 <- filter(plate_conc_filtered, Culture != "X")
+resultgrowth <- ddply(plate_conc_filtered2, .(Timepoint, Culture), summarise,  MEAN=mean(OD600), SE = sd(OD600)/sqrt(length(OD600))) 
+
+limitgrowth<-aes(ymin=MEAN-SE, ymax=MEAN+SE) #include error bars if desired
+
+resultgrowth <- filter(resultgrowth, Culture != "NA")
+
+# resultcuttp0 <- filter(resulttp0, Timepoint <= "720")
+#to view only up to hour XX, filter out timepoints greater than x*60
+
+growthcurvesmean1 <- ggplot(resultgrowth, aes(x=Timepoint/60, y = MEAN, color = Culture, fill = Culture,  group = interaction(Culture))) +
+  theme_minimal() +
+  geom_point(size = 0.25,aes(fill = Culture)) +
+  # geom_errorbar(limitgrowth, width=0.25)+
+  geom_line(linetype = "solid") +
+   theme(panel.background = element_rect(fill = "transparent"), ) +
+     theme(strip.text = element_text(
+    size = 10, color = "black")) +
+        ggh4x::facet_grid2(Culture ~ .) +
+   theme(panel.background = element_rect(fill = "transparent"), 
+        panel.grid.minor = element_line(color = "gray", linetype = "dotted"),
+        panel.grid.major = element_line(color = "gray", linetype = "dotted")) + 
+      guides(fill = "none") +
+  labs(x = "Hours", y = "OD600", title = "Growthcurves (add info)", color = "Antibiotic Conc., ug/ml")
+
+growthcurvesmean1
+
+```
+
+```{r, fig.width= 7, fig.height= 25, echo=FALSE}
+
+curvesbywell <- ggplot(plate_conc_filtered2, aes(x=Timepoint/60, y = OD600, color = Culture, fill = Culture,  group = interaction(Contents))) +
+  theme_minimal() +
+  geom_point(size = 0.25,aes(fill = Culture)) +
+  # geom_errorbar(limitstp0, width=0.25)+
+  geom_line(linetype = "solid") +
+   theme(panel.background = element_rect(fill = "transparent"), ) +
+     theme(strip.text = element_text(
+    size = 10, color = "black")) +
+        ggh4x::facet_grid2(Well ~ .) +
+   theme(panel.background = element_rect(fill = "transparent"),  # Set background color to transparent
+        panel.grid.minor = element_line(color = "gray", linetype = "dotted"),  # Set major gridlines color to gray
+        panel.grid.major = element_line(color = "gray", linetype = "dotted")) + 
+    # guides(color = "none") +
+      guides(fill = "none") +
+  labs(x = "Time- hours", y = "OD600", title = "Growthcurves of organism- insert media name and date here", color = "Antibiotic Concentration, ug/ml")
+
+curvesbywell
+
+
+```
+
+
+```{r, printgrowthconditions, echo=FALSE}
+
+header_data_clip <- header_data[2:25,1:2 ]
+header_data_clip[is.na(header_data_clip)] <- "--"
+# kable(header_data_clip, format = "markdown")
+# # header_data_clip
+
+kable(header_data_clip, "latex", booktabs = TRUE) %>%
+  kable_styling(latex_options = "hold_position")%>%
+  add_header_above(c("Growth Curve Experiment Conditions" = ncol(header_data_clip)))
+```
